@@ -46,11 +46,13 @@ export default function Home() {
     setupMqtt();
   }, []);
 
-  const [crashSound, { stop: stopCrash }] = useSound("static/destruction.mp3");
+  const [crashSound, { stop: stopCrash }] = useSound("static/destruction.mp3", {
+    volume: 0.75,
+  });
   const [fireSound, { stop: stopFireSound }] = useSound(
     "static/fireplace.mp3",
     {
-      volume: 0.25,
+      volume: 0.5,
       onend: () => {
         if (fireGoing) {
           fireSound();
