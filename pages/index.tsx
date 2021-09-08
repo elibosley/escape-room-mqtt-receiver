@@ -1,70 +1,63 @@
 import Head from "next/head";
 import Image from "next/image";
 import styles from "../styles/Home.module.css";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSound from "use-sound";
 import MQTT from "async-mqtt";
 import { useRouter } from "next/dist/client/router";
+import { useCallback } from "react";
 
 const FIREPLACE_COMMAND = "cmnd/FIREPLACE/POWER";
 const CRASH_EFFECT_COMMAND = "cmnd/CRASH_EFFECT/POWER";
 const ON = "ON";
 const OFF = "OFF";
 export default function Home() {
-  const { query } = useRouter();
-  const [brokerUrl, setBrokerUrl] = useState("");
-  useEffect(() => {
-    setBrokerUrl(`ws://${query.brokerUrl}`);
-  }, [query.brokerUrl]);
+  const {
+    query: { brokerUrl },
+    push,
+  } = useRouter();
+
   const [fireGoing, setFireGoing] = useState<boolean>(false);
   const [messages, setMessages] = useState<any>([]);
   const [initialize, setInitialized] = useState<boolean>(false);
   const [clientConnected, setClientConnected] = useState<boolean>(false);
-  useEffect(() => {
-    const setupMqtt = async () => {
-      const client = await MQTT.connect("ws://192.168.1.182:9091");
 
+  const setupMqtt = useCallback(async () => {
+    let client: MQTT.AsyncMqttClient;
+    try {
+      client = await MQTT.connect(
+        brokerUrl ? `ws://${brokerUrl}` : "ws://192.168.1.182:9091"
+      );
       client.on("connect", () => {
         setClientConnected(true);
       });
-      try {
-        await client.subscribe(FIREPLACE_COMMAND);
-        await client.subscribe(CRASH_EFFECT_COMMAND);
-        client.on("message", async (topic, payload) => {
-          setMessages((m) => ({ ...m, [topic]: payload.toString() }));
-        });
-        // This line doesn't run until the server responds to the publish
-        //
-        // This line doesn't run until the client has disconnected without error
-        console.log("Done");
-      } catch (e) {
-        // Do something about it!
-        console.log(e.stack);
+      client.on("error", (e) => alert(e));
+      await client.subscribe(FIREPLACE_COMMAND);
+      await client.subscribe(CRASH_EFFECT_COMMAND);
+      client.on("message", async (topic, payload) => {
+        setMessages((m) => ({ ...m, [topic]: payload.toString() }));
+      });
+      // This line doesn't run until the server responds to the publish
+      //
+      // This line doesn't run until the client has disconnected without error
+      console.log("Done");
+    } catch (e) {
+      // Do something about it!
+      alert(e.message);
+      console.log(e.stack);
+      if (client) {
         client.end();
       }
-    };
-    setupMqtt();
-  }, []);
+    }
+  }, [brokerUrl]);
 
   const [crashSound, { stop: stopCrash }] = useSound("static/destruction.mp3", {
     volume: 0.75,
   });
-  const [fireSound, { stop: stopFireSound }] = useSound(
-    "static/fireplace.mp3",
-    {
-      volume: 0.5,
-      onend: () => {
-        if (fireGoing) {
-          fireSound();
-          console.info("Fire ended - Restarting");
-        }
-        console.info("Fire ended, fire stopped so cancelling sound");
-      },
-    }
-  );
 
   useEffect(() => {
     if (initialize) {
+      setupMqtt();
       setFireGoing(true);
     }
   }, [initialize]);
@@ -77,29 +70,56 @@ export default function Home() {
       stopCrash();
     }
     if (messages[FIREPLACE_COMMAND] === OFF) {
+      console.log("RECEIVED FIRE STOP COMMAND");
       setFireGoing(false);
     }
     if (messages[FIREPLACE_COMMAND] === ON) {
       setFireGoing(true);
     }
-  }, [messages, crashSound]);
+  }, [messages, crashSound, stopCrash]);
 
-  useEffect(() => {
+  const musicPlayers = useRef<HTMLAudioElement | undefined>();
+
+  function checkIfContinue(ev: Event) {
     if (fireGoing) {
-      fireSound();
-    } else {
-      stopFireSound();
+      this.currentTime = 0;
+      this.play();
     }
-  }, [fireGoing, fireSound, stopFireSound]);
-
+  }
+  useEffect(() => {
+    if (musicPlayers.current) {
+      console.log(musicPlayers.current);
+      musicPlayers.current.addEventListener("ended", checkIfContinue, false);
+      musicPlayers.current.play();
+    }
+  }, [musicPlayers, fireGoing]);
   return (
     <div className={styles.container}>
       <Head>
         <title>MQTT Listener</title>
         <link rel="icon" href="/favicon.ico" />
       </Head>
-
       <main className={styles.main}>
+        <audio
+          src="static/short.mp3"
+          controls
+          autoPlay
+          muted
+          ref={musicPlayers}
+        />
+        <h1 className={styles.title}>
+          {" "}
+          Broker URL:
+          <input
+            onChange={(e) =>
+              push({
+                pathname: "/",
+                query: { brokerUrl: e.currentTarget.value },
+              })
+            }
+            value={brokerUrl}
+          />
+        </h1>
         <h1 className={styles.title}>
           MQTT Status:{" "}
           {clientConnected ? (
@@ -130,6 +150,7 @@ export default function Home() {
           Start Room
         </button>
       )}
+      <button onClick={() => setFireGoing(false)}>STOP</button>
     </div>
   );
 }
